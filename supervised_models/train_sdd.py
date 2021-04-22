@@ -7,7 +7,8 @@ from kornia.losses import focal_loss
 from pytorch_lightning.callbacks import LearningRateMonitor
 from pytorch_lightning.metrics.functional import iou
 from segmentation_models_pytorch import DeepLabV3Plus, DeepLabV3
-from torchmetrics import IoU
+
+# from torchmetrics import IoU
 
 sys.path.append(os.getcwd())
 import cv2
@@ -63,8 +64,6 @@ class SegModel(pl.LightningModule):
         # self.net = DeepLabV3('mobilenet_v2', in_channels=3, classes=self.num_classes)
         # self.net = ENet(num_classes=19)
 
-        self.iou = IoU(4, reduction="none")
-
         # self.net = ENet(num_classes=19)
 
     def forward(self, x):
@@ -101,7 +100,6 @@ class SegModel(pl.LightningModule):
         # loss = focal_loss(out, mask_batch, alpha=0.5, gamma=2, reduction="mean")
 
         self.log('val_loss', loss)
-        self.iou(F.softmax(out, dim=1), mask_batch)
 
         # log images with segmentation mask
         for im_name, im, out_mask in zip(im_name_batch, im_batch, out):
@@ -116,22 +114,26 @@ class SegModel(pl.LightningModule):
             masked_img = self.val_dataset.dataset.generate_masked_image(im, out_mask)
             self.logger.experiment.add_image(f"images/{self.current_epoch}", torch.tensor(masked_img).permute(2, 0, 1))
             break
-        return {'val_loss': loss}
+        return {'val_loss': loss, 'pred': out.cpu(), 'target': mask_batch.cpu()}
 
     def validation_epoch_end(self, outputs):
-        res_iou = self.iou.compute()
+        preds = torch.cat([tmp['pred'] for tmp in outputs])
+        targets = torch.cat([tmp['target'] for tmp in outputs])
+        val_iou = iou(F.softmax(preds, dim=1), targets, num_classes=4, reduction='none')
         self.logger.experiment.add_scalars("val_iou", {cat_name: cat_iou for cat_name, cat_iou in
-                                                       zip(self.train_dataset.dataset.categories, res_iou)},
+                                                       zip(self.train_dataset.dataset.categories, val_iou)},
                                            global_step=self.global_step)
 
     def configure_optimizers(self):
         opt = torch.optim.Adam(self.net.parameters(), lr=self.learning_rate, weight_decay=1e-5)
-        sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=10)
-        # sch = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode="min", factor=0.3, patience=2)
+        # sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=10, eta_min=1e-5)
+        # sch = torch.optim.lr_scheduler.CyclicLR(opt, base_lr=3e-5, max_lr=self.learning_rate, step_size_up=2000,
+        #                                         mode="triangular2")
+        sch = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode="min", factor=0.3, patience=2)
         return {
             'optimizer': opt,
             'lr_scheduler': sch,
-            # 'monitor': 'val_loss',
+            'monitor': 'val_loss',
         }
 
     def setup(self, stage: str) -> None:
@@ -168,7 +170,7 @@ class SegModel(pl.LightningModule):
 def train():
     model = SegModel()
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
-        dirpath='checkpoints/deeplabv3effnet/',
+        dirpath='checkpoints/deeplabv3_effnet-b2/',
         save_top_k=1,
         verbose=True,
         monitor='val_loss',
