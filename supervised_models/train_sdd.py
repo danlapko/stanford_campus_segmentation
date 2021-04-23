@@ -43,9 +43,9 @@ class UnNormalize(object):
         return tensor
 
 
-class SegModel(pl.LightningModule):
+class SDDSegModel(pl.LightningModule):
     def __init__(self):
-        super(SegModel, self).__init__()
+        super(SDDSegModel, self).__init__()
         self.batch_size = 3
         self.learning_rate = 1e-3
         self.num_classes = 4
@@ -126,6 +126,7 @@ class SegModel(pl.LightningModule):
             x = img
             x = self.val_dataset.dataset.torch_transform(x)
             x = torch.unsqueeze(x, 0)
+            x = x.to(self.device)
             out_mask = self.forward(x)
             # print(x.shape, out_mask.shape)
             out_mask = out_mask[0].permute(1, 2, 0).cpu().numpy()
@@ -188,7 +189,7 @@ class SegModel(pl.LightningModule):
 
 
 def train():
-    model = SegModel()
+    model = SDDSegModel()
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
         dirpath='checkpoints/deeplabv3_effnet-b2/',
         save_top_k=1,
@@ -207,17 +208,5 @@ def train():
     trainer.fit(model)
 
 
-def inference():
-    model = SegModel().load_from_checkpoint('checkpoints/deeplabv3_effnet-b2/epoch=21-step=2639.ckpt')
-    model.setup("val")
-    im = cv2.imread("reference.jpg")
-    im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
-    im = cv2.resize(im, tuple(model.input_size[:2] * 2))
-    out_im = model.forward_img(im)
-    out_im = cv2.cvtColor(out_im, cv2.COLOR_RGB2BGR)
-    cv2.imwrite(f"result.jpg", out_im)
-
-
 if __name__ == '__main__':
-    # train()
-    inference()
+    train()
