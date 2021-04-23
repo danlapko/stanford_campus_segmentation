@@ -49,6 +49,7 @@ class SDD_Dataset(Dataset):
 
         self.mean = [0.485, 0.456, 0.406]
         self.std = [0.229, 0.224, 0.225]
+        self.torch_transform = T.Compose([T.ToTensor(), T.Normalize(self.mean, self.std)])
 
     def set_transform(self, transform):
         self.transform = transform
@@ -70,8 +71,7 @@ class SDD_Dataset(Dataset):
         if self.transform is None:
             img = Image.fromarray(img)
 
-        t = T.Compose([T.ToTensor(), T.Normalize(self.mean, self.std)])
-        img = t(img)
+        img = self.torch_transform(img)
         mask = torch.from_numpy(mask).long()
         return img_name, img, mask
 

@@ -50,7 +50,10 @@ class SegModel(pl.LightningModule):
         self.learning_rate = 1e-3
         self.num_classes = 4
         self.val_split_part = 0.1
+        self.input_size = np.array([512, 768, 3])  # 576, 864
 
+        self.transform_train = None
+        self.transform_val = None
         self.train_dataset = None
         self.val_dataset = None
         self.unnormalizer = None
@@ -116,6 +119,22 @@ class SegModel(pl.LightningModule):
             break
         return {'val_loss': loss, 'pred': out.cpu(), 'target': mask_batch.cpu()}
 
+    def forward_img(self, img):
+        self.net.eval()
+        with torch.no_grad():
+            # img = self.transform_val(image=img)["image"]
+            x = img
+            x = self.val_dataset.dataset.torch_transform(x)
+            x = torch.unsqueeze(x, 0)
+            out_mask = self.forward(x)
+            # print(x.shape, out_mask.shape)
+            out_mask = out_mask[0].permute(1, 2, 0).cpu().numpy()
+            out_mask = np.argmax(out_mask, axis=-1)
+            # print(out_mask.max())
+
+        masked_img = self.val_dataset.dataset.generate_masked_image(img, out_mask)
+        return masked_img
+
     def validation_epoch_end(self, outputs):
         preds = torch.cat([tmp['pred'] for tmp in outputs])
         targets = torch.cat([tmp['target'] for tmp in outputs])
@@ -137,24 +156,25 @@ class SegModel(pl.LightningModule):
         }
 
     def setup(self, stage: str) -> None:
-        t_train = A.Compose([A.RandomCrop(2000, 3000, p=0.5), A.Resize(512, 768,  # 576, 864
-                                                                       interpolation=cv2.INTER_AREA),
-                             A.HorizontalFlip(p=0.5), A.VerticalFlip(p=0.5), A.Rotate(p=0.5),
-                             A.GridDistortion(p=0.2),
-                             A.RandomBrightnessContrast((0, 0.5), (0, 0.5), p=0.5),
-                             A.GaussNoise(p=0.3)])
-        t_val = A.Compose([A.Resize(512, 768, interpolation=cv2.INTER_AREA),
-                           # A.HorizontalFlip(),
-                           # A.GridDistortion(p=0.2)
-                           ])
+        self.transform_train = A.Compose(
+            [A.RandomCrop(2000, 3000, p=0.5), A.Resize(self.input_size[0], self.input_size[1],
+                                                       interpolation=cv2.INTER_AREA),
+             A.HorizontalFlip(p=0.5), A.VerticalFlip(p=0.5), A.Rotate(p=0.5),
+             A.GridDistortion(p=0.2),
+             A.RandomBrightnessContrast((0, 0.5), (0, 0.5), p=0.5),
+             A.GaussNoise(p=0.3)])
+        self.transform_val = A.Compose([A.Resize(self.input_size[0], self.input_size[1], interpolation=cv2.INTER_AREA),
+                                        # A.HorizontalFlip(),
+                                        # A.GridDistortion(p=0.2)
+                                        ])
         dataset = SDD_Dataset("data/SDD", preload=False, transform=None)
 
         n_val = int(len(dataset) * self.val_split_part)
         n_train = len(dataset) - n_val
         train_ds, val_ds = random_split(dataset, [n_train, n_val])
 
-        train_ds.dataset.set_transform(t_train)
-        val_ds.dataset.set_transform(t_val)
+        train_ds.dataset.set_transform(self.transform_train)
+        val_ds.dataset.set_transform(self.transform_val)
 
         self.train_dataset = train_ds
         self.val_dataset = val_ds
@@ -187,5 +207,17 @@ def train():
     trainer.fit(model)
 
 
+def inference():
+    model = SegModel().load_from_checkpoint('checkpoints/deeplabv3_effnet-b2/epoch=21-step=2639.ckpt')
+    model.setup("val")
+    im = cv2.imread("reference.jpg")
+    im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+    im = cv2.resize(im, tuple(model.input_size[:2] * 2))
+    out_im = model.forward_img(im)
+    out_im = cv2.cvtColor(out_im, cv2.COLOR_RGB2BGR)
+    cv2.imwrite(f"result.jpg", out_im)
+
+
 if __name__ == '__main__':
-    train()
+    # train()
+    inference()
