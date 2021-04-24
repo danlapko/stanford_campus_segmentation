@@ -47,15 +47,15 @@ class UnNormalize(object):
 class StanfordSegModel(pl.LightningModule):
     def __init__(self):
         super(StanfordSegModel, self).__init__()
-        self.train_batch_size = 2
+        self.train_batch_size = 3
         self.val_batch_size = 16
         self.part_of_train_dataset = 0.015
         self.part_of_val_dataset = 0.15
 
-        self.learning_rate = 5e-4
+        self.learning_rate = 1e-3
         self.num_classes = 4
         self.val_split_part = 0.1
-        self.input_size = np.array([736, 736, 3])  # 576, 864
+        self.input_size = np.array([640, 640, 3])  # 576, 864
         self.interframe_step = 4
 
         self.transform_train = None
@@ -66,7 +66,7 @@ class StanfordSegModel(pl.LightningModule):
 
         self.iou = IoU(num_classes=4, reduction="none")
 
-        self.net = DeepLabV3('efficientnet-b2', in_channels=9, classes=self.num_classes, encoder_weights="imagenet")
+        self.net = DeepLabV3('efficientnet-b2', in_channels=3, classes=self.num_classes)
 
     def forward(self, x):
         out = self.net(x)
@@ -98,16 +98,17 @@ class StanfordSegModel(pl.LightningModule):
         self.log('val_loss', loss)
         # log images with segmentation mask
         for triplet_ix, triplet_ims, out_mask in zip(triplet_ixs, stacked_triplet_ims, out):
-            im = triplet_ims[3:6]
-            im = self.unnormalizer(im)
-            im = im.permute(1, 2, 0).cpu().numpy()
+            triplet_ims = self.unnormalizer(triplet_ims)
+            im = triplet_ims[1]
+            # im = im.permute(1, 2, 0).cpu().numpy()
+            im = im.cpu().numpy()
             im = cv2.normalize(im, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F).astype(
                 np.uint8)
 
             out_mask = out_mask.permute(1, 2, 0).cpu().numpy()
             out_mask = np.argmax(out_mask, axis=-1)
 
-            masked_img = self.val_dataset.generate_masked_image(im, out_mask) #mask[0].cpu().numpy())
+            masked_img = self.val_dataset.generate_masked_image(im, out_mask, gray_img=True)  # mask[0].cpu().numpy())
             self.logger.experiment.add_image(f"images/{self.current_epoch}", torch.tensor(masked_img).permute(2, 0, 1))
             break
         return {'val_loss': loss}
@@ -192,7 +193,7 @@ def train():
     lr_monitor = LearningRateMonitor(logging_interval='step')
     trainer = pl.Trainer(gpus=1, callbacks=[lr_monitor],
                          checkpoint_callback=checkpoint_callback,
-                         num_sanity_val_steps=-1,
+                         num_sanity_val_steps=20,
                          log_every_n_steps=4,
                          # max_epochs=1,
                          # resume_from_checkpoint='checkpoints_stanford/deeplabv3_effnet-b2/epoch=4-step=2229.ckpt'

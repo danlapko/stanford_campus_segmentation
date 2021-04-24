@@ -43,8 +43,10 @@ class StanfordDataset(Dataset):
                                        "bicycle": (255, 255, 0)  # yellow
                                        }
 
-        self.mean = [0.485, 0.456, 0.406, 0.485, 0.456, 0.406, 0.485, 0.456, 0.406]
-        self.std = [0.229, 0.224, 0.225, 0.229, 0.224, 0.225, 0.229, 0.224, 0.225]
+        # self.mean = [0.485, 0.456, 0.406, 0.485, 0.456, 0.406, 0.485, 0.456, 0.406]
+        # self.std = [0.229, 0.224, 0.225, 0.229, 0.224, 0.225, 0.229, 0.224, 0.225]
+        self.mean = [0.485, 0.456, 0.406]
+        self.std = [0.229, 0.224, 0.225]
         self.torch_transform = T.Compose([T.ToTensor(), T.Normalize(self.mean, self.std)])
 
     def _load_video_dirs(self):
@@ -100,12 +102,15 @@ class StanfordDataset(Dataset):
         video_dir, triplet_nums, boxes = self.triplets[item]
         triplet_ims = []
         for triplet_num in triplet_nums:
-            im = cv2.imread(os.path.join(video_dir, "frames", f"{triplet_num}.jpg"))
-            im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+            im = cv2.imread(os.path.join(video_dir, "frames", f"{triplet_num}.jpg"), 0)
+            # im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
             triplet_ims.append(im)
 
-        stacked_triplet_ims = np.concatenate(triplet_ims, axis=2)
+        # stacked_triplet_ims = np.concatenate(triplet_ims, axis=2)
+        print([im.shape for im in triplet_ims])
+        stacked_triplet_ims = np.stack(triplet_ims, axis=-1)
         mask = cv2.imread(os.path.join(video_dir, "seg_masks", f"{triplet_nums[1]}.png"), 0)
+        print(mask.shape)
 
         if self.transform is not None:
             # print(len(triplet_ims), triplet_ims[0].shape, stacked_triplet_ims.shape, mask.shape)
@@ -146,7 +151,9 @@ class StanfordDataset(Dataset):
                 break
         cv2.destroyAllWindows()
 
-    def generate_masked_image(self, img, mask, alpha=0.4):
+    def generate_masked_image(self, img, mask, alpha=0.4, gray_img=False):
+        if gray_img:
+            img = np.stack((img,) * 3, axis=-1)
         bgr_mask = np.zeros_like(img)
         for cat, cat_bgr in self.categories_2_color_map.items():
             bgr_mask[mask == self.categories_2_label_map[cat]] = cat_bgr
