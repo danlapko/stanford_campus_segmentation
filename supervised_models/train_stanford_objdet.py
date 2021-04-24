@@ -47,12 +47,12 @@ class UnNormalize(object):
 class StanfordSegModel(pl.LightningModule):
     def __init__(self):
         super(StanfordSegModel, self).__init__()
-        self.train_batch_size = 2
+        self.train_batch_size = 3
         self.val_batch_size = 16
-        self.part_of_train_dataset = 0.025
+        self.part_of_train_dataset = 0.015
         self.part_of_val_dataset = 0.15
 
-        self.learning_rate = 1e-4
+        self.learning_rate = 1e-3
         self.num_classes = 4
         self.val_split_part = 0.1
         self.input_size = np.array([640, 640, 3])  # 576, 864
@@ -78,8 +78,7 @@ class StanfordSegModel(pl.LightningModule):
         out = self.forward(stacked_triplet_ims)
         # print(out.shape)
         # print(mask.shape)
-        loss = F.cross_entropy(out, mask, reduction="mean")
-        # bin_mask = mask > 0
+        loss = F.cross_entropy(out, mask)
         # loss = focal_loss(out, mask, alpha=1, gamma=2, reduction="mean")
 
         self.log('train_loss', loss)
@@ -93,8 +92,8 @@ class StanfordSegModel(pl.LightningModule):
         triplet_ixs, stacked_triplet_ims, mask = batch
         out = self.forward(stacked_triplet_ims)
 
-        loss = F.cross_entropy(out, mask, reduction="mean")
-        # loss = focal_loss(out, mask, alpha=1, gamma=2, reduction="mean")
+        loss = F.cross_entropy(out, mask)
+        # loss = focal_loss(out, mask_batch, alpha=0.5, gamma=2, reduction="mean")
         self.iou.update(F.softmax(out, dim=1), mask)
         self.log('val_loss', loss)
         # log images with segmentation mask
@@ -143,7 +142,7 @@ class StanfordSegModel(pl.LightningModule):
         opt = torch.optim.Adam(self.net.parameters(), lr=self.learning_rate, weight_decay=1e-5)
         # sch = torch.optim.lr_scheduler.CyclicLR(opt, base_lr=3e-5, max_lr=self.learning_rate, step_size_up=2000,
         #                                         mode="triangular2")
-        sch = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode="min", factor=0.1, patience=1)
+        sch = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode="min", factor=0.3, patience=2)
         return {
             'optimizer': opt,
             'lr_scheduler': sch,
@@ -157,28 +156,28 @@ class StanfordSegModel(pl.LightningModule):
             A.HorizontalFlip(p=0.5), A.VerticalFlip(p=0.5), A.Rotate(p=0.5),
             A.GridDistortion(p=0.2),
             A.RandomBrightnessContrast((0, 0.5), (0, 0.5), p=0.5),
-            A.GaussNoise(p=0.3)], additional_targets={'box_mask': 'mask'})
+            A.GaussNoise(p=0.3)])
         self.transform_val = A.Compose([
             A.SmallestMaxSize(min(self.input_size[:2]), always_apply=True, interpolation=cv2.INTER_AREA),
             A.RandomCrop(self.input_size[0], self.input_size[1], always_apply=1),
             # A.HorizontalFlip(),
             # A.GridDistortion(p=0.2)
-        ], additional_targets={'box_mask': 'mask'})
+        ])
         self.train_dataset = StanfordDataset("data/stanford_drone/videos", interframe_step=self.interframe_step,
                                              mode="train", part_of_dataset_to_use=self.part_of_train_dataset,
-                                             dilate=True, transform=self.transform_train)
+                                             transform=self.transform_train)
         self.val_dataset = StanfordDataset("data/stanford_drone/videos", interframe_step=self.interframe_step,
                                            mode="val", part_of_dataset_to_use=self.part_of_val_dataset,
-                                           dilate=True, transform=self.transform_val)
+                                           transform=self.transform_val)
         self.unnormalizer = UnNormalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.train_batch_size, shuffle=True, num_workers=8,
-                          pin_memory=True, drop_last=True)
+                          pin_memory=True)
 
     def val_dataloader(self) -> Union[DataLoader, List[DataLoader]]:
         return DataLoader(self.val_dataset, batch_size=self.val_batch_size, shuffle=False, num_workers=8,
-                          pin_memory=True, drop_last=True)
+                          pin_memory=True)
 
 
 def train():
@@ -197,7 +196,7 @@ def train():
                          num_sanity_val_steps=20,
                          log_every_n_steps=4,
                          # max_epochs=1,
-                         resume_from_checkpoint='checkpoints_stanford/deeplabv3_effnet-b2/epoch=10-step=3772.ckpt'
+                         # resume_from_checkpoint='checkpoints_stanford/deeplabv3_effnet-b2/epoch=4-step=2229.ckpt'
                          )
     trainer.fit(model)
 

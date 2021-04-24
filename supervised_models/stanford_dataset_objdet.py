@@ -6,9 +6,10 @@ import numpy as np
 import pandas as pd
 import torch
 from PIL import Image
-from torch.utils.data import Dataset
 from torchvision import transforms as T
+from torch.utils.data import Dataset
 from tqdm import tqdm
+import albumentations as A
 
 
 class StanfordDataset(Dataset):
@@ -17,15 +18,13 @@ class StanfordDataset(Dataset):
     Ground truth masks are obtained by subtracting the background in the bounding rectangles of this object.
     """
 
-    def __init__(self, root_dir: str, interframe_step=1, mode="val", part_of_dataset_to_use=1, dilate=False,
-                 transform=None):
+    def __init__(self, root_dir: str, interframe_step=1, mode="val", part_of_dataset_to_use=1, transform=None):
         """
             root_dir: root dir of dataset where scenes all placed
             interframe_step: 1 - consecutive 3 frames get into sample triplet,
                              >1 - (i_frame-interframe_step, i_frame, i_frame+interframe_step) frames get into triplet,
                              0 -  (i_frame, i_frame, i_frame) - triplet consists of same frames
         """
-        self.dilate = dilate
         self.part_of_dataset_to_use = part_of_dataset_to_use
         self.interframe_step = interframe_step
         self.root_dir = root_dir
@@ -49,7 +48,6 @@ class StanfordDataset(Dataset):
         self.mean = [0.485, 0.456, 0.406]
         self.std = [0.229, 0.224, 0.225]
         self.torch_transform = T.Compose([T.ToTensor(), T.Normalize(self.mean, self.std)])
-        self.dilate_kernel = np.ones((5, 5), np.uint8)
 
     def _load_video_dirs(self):
         video_dirs = []
@@ -109,14 +107,10 @@ class StanfordDataset(Dataset):
             triplet_ims.append(im)
 
         # stacked_triplet_ims = np.concatenate(triplet_ims, axis=2)
-        # print([im.shape for im in triplet_ims])
+        print([im.shape for im in triplet_ims])
         stacked_triplet_ims = np.stack(triplet_ims, axis=-1)
         mask = cv2.imread(os.path.join(video_dir, "seg_masks", f"{triplet_nums[1]}.png"), 0)
-        # box_mask = cv2.imread(os.path.join(video_dir, "box_masks", f"{triplet_nums[1]}.png"), 0)
-
-        if self.dilate:
-            mask = cv2.dilate(mask, self.dilate_kernel, iterations=1)
-        # print(mask.shape)
+        print(mask.shape)
 
         if self.transform is not None:
             # print(len(triplet_ims), triplet_ims[0].shape, stacked_triplet_ims.shape, mask.shape)
@@ -125,11 +119,10 @@ class StanfordDataset(Dataset):
             #     a_transform = [A.Rotate((90, 90), cv2.INTER_AREA, p=1)] + a_transform
             # a_transform = A.Compose(a_transform)
 
-            aug = self.transform(image=stacked_triplet_ims, mask=mask)#, box_mask=box_mask)
+            aug = self.transform(image=stacked_triplet_ims, mask=mask)
             stacked_triplet_ims = aug['image']
             # stacked_triplet_ims = Image.fromarray(aug['image'])
             mask = aug['mask']
-            box_mask = aug['mask']
 
         if self.transform is None:
             stacked_triplet_ims = Image.fromarray(stacked_triplet_ims)
@@ -140,10 +133,9 @@ class StanfordDataset(Dataset):
         # if self.rotate_if_h_more_w and stacked_triplet_ims.shape[1] > stacked_triplet_ims.shape[2]:
         #     stacked_triplet_ims = torch.rot90(stacked_triplet_ims, 1, [1, 2])
         mask = torch.from_numpy(mask).long()
-        # box_mask = torch.from_numpy(box_mask).long()
         # print(len(video_dir), len(triplet_nums), stacked_triplet_ims.shape, mask.shape, len(boxes))
         triplet_ix = item
-        return triplet_ix, stacked_triplet_ims, mask#, box_mask
+        return triplet_ix, stacked_triplet_ims, mask
 
     def show_masks(self, alpha):
         raise NotImplemented
