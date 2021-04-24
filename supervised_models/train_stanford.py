@@ -122,12 +122,12 @@ class StanfordSegModel(pl.LightningModule):
                                            global_step=self.global_step)
 
     def forward_img(self, im_triplet):
-        raise NotImplemented
         self.net.eval()
         with torch.no_grad():
             # img = self.transform_val(image=img)["image"]
-            x = im_triplet
-            x = self.val_dataset.torch_transform(x)
+            im_triplet = np.stack(im_triplet, axis=-1)
+            # x = self.transform_test(im_triplet)['image']
+            x = self.val_dataset.torch_transform(im_triplet)
             x = torch.unsqueeze(x, 0)
             x = x.to(self.device)
             out_mask = self.forward(x)
@@ -136,7 +136,8 @@ class StanfordSegModel(pl.LightningModule):
             out_mask = np.argmax(out_mask, axis=-1)
             # print(out_mask.max())
 
-        masked_img = self.val_dataset.generate_masked_image(im_triplet[3:6], out_mask)
+        # print(im_triplet.shape, out_mask.shape)
+        masked_img = self.val_dataset.generate_masked_image(im_triplet[:, :, 1], out_mask, gray_img=True)
         return masked_img
 
     def configure_optimizers(self):
@@ -157,13 +158,19 @@ class StanfordSegModel(pl.LightningModule):
             A.HorizontalFlip(p=0.5), A.VerticalFlip(p=0.5), A.Rotate(p=0.5),
             A.GridDistortion(p=0.2),
             A.RandomBrightnessContrast((0, 0.5), (0, 0.5), p=0.5),
-            A.GaussNoise(p=0.3)], additional_targets={'box_mask': 'mask'})
+            A.GaussNoise(p=0.3)], additional_targets={'box_mask': 'mask'},
+            bbox_params=A.BboxParams(format='pascal_voc', label_fields=['category_ids']))
+
         self.transform_val = A.Compose([
             A.SmallestMaxSize(min(self.input_size[:2]), always_apply=True, interpolation=cv2.INTER_AREA),
             A.RandomCrop(self.input_size[0], self.input_size[1], always_apply=1),
             # A.HorizontalFlip(),
             # A.GridDistortion(p=0.2)
-        ], additional_targets={'box_mask': 'mask'})
+        ], additional_targets={'box_mask': 'mask'},
+            bbox_params=A.BboxParams(format='pascal_voc', label_fields=['category_ids']))
+        # self.transform_test = A.Resize(self.input_size[0], self.input_size[1], interpolation=cv2.INTER_AREA,
+        #                                always_apply=True)
+
         self.train_dataset = StanfordDataset("data/stanford_drone/videos", interframe_step=self.interframe_step,
                                              mode="train", part_of_dataset_to_use=self.part_of_train_dataset,
                                              dilate=True, transform=self.transform_train)

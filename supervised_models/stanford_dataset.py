@@ -125,11 +125,13 @@ class StanfordDataset(Dataset):
             #     a_transform = [A.Rotate((90, 90), cv2.INTER_AREA, p=1)] + a_transform
             # a_transform = A.Compose(a_transform)
 
-            aug = self.transform(image=stacked_triplet_ims, mask=mask)#, box_mask=box_mask)
+            # boxes_ = [(x1, y1, x2, y2) for x1, y1, x2, y2, cat in boxes]
+
+            aug = self.transform(image=stacked_triplet_ims, mask=mask)  # , bboxes=boxes)  # , box_mask=box_mask)
             stacked_triplet_ims = aug['image']
             # stacked_triplet_ims = Image.fromarray(aug['image'])
             mask = aug['mask']
-            box_mask = aug['mask']
+            # box_mask = aug['mask']
 
         if self.transform is None:
             stacked_triplet_ims = Image.fromarray(stacked_triplet_ims)
@@ -143,7 +145,7 @@ class StanfordDataset(Dataset):
         # box_mask = torch.from_numpy(box_mask).long()
         # print(len(video_dir), len(triplet_nums), stacked_triplet_ims.shape, mask.shape, len(boxes))
         triplet_ix = item
-        return triplet_ix, stacked_triplet_ims, mask#, box_mask
+        return triplet_ix, stacked_triplet_ims, mask  # , box_mask
 
     def show_masks(self, alpha):
         raise NotImplemented
