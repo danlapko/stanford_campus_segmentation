@@ -47,16 +47,17 @@ class UnNormalize(object):
 class StanfordSegModel(pl.LightningModule):
     def __init__(self):
         super(StanfordSegModel, self).__init__()
+        self.in_channels = 7
+        self.interframe_step = 3
+        self.num_classes = 3
+        self.input_size = np.array([640, 640, 3])  # 576, 864
+
         self.train_batch_size = 2
         self.val_batch_size = 16
+        self.learning_rate = 1e-4
+
         self.part_of_train_dataset = 0.025
         self.part_of_val_dataset = 0.15
-
-        self.learning_rate = 1e-4
-        self.num_classes = 4
-        self.val_split_part = 0.1
-        self.input_size = np.array([640, 640, 3])  # 576, 864
-        self.interframe_step = 4
 
         self.transform_train = None
         self.transform_val = None
@@ -64,9 +65,9 @@ class StanfordSegModel(pl.LightningModule):
         self.val_dataset = None
         self.unnormalizer = None
 
-        self.iou = IoU(num_classes=4, reduction="none")
+        self.iou = IoU(num_classes=self.num_classes, reduction="none")
 
-        self.net = DeepLabV3('efficientnet-b2', in_channels=3, classes=self.num_classes)
+        self.net = DeepLabV3('efficientnet-b2', in_channels=self.in_channels, classes=self.num_classes)
 
     def forward(self, x):
         out = self.net(x)
@@ -74,33 +75,36 @@ class StanfordSegModel(pl.LightningModule):
         return out
 
     def training_step(self, batch, batch_ix):
-        triplet_ixs, stacked_triplet_ims, mask = batch
-        out = self.forward(stacked_triplet_ims)
-        # print(out.shape)
-        # print(mask.shape)
-        loss = F.cross_entropy(out, mask, reduction="mean")
-        # bin_mask = mask > 0
-        # loss = focal_loss(out, mask, alpha=1, gamma=2, reduction="mean")
+        sample_ixs, stacked_sample_ims, mask = batch
+
+        out = self.forward(stacked_sample_ims)
+
+        # loss = F.cross_entropy(out, mask, reduction="mean")
+        loss = focal_loss(out, mask, alpha=1, gamma=2, reduction="mean")
 
         self.log('train_loss', loss)
         self.logger.experiment.add_scalars("train_iou", {
             cat_name: cat_iou for cat_name, cat_iou in zip(self.train_dataset.categories,
-                                                           iou(F.softmax(out, dim=1), mask, num_classes=4,
+                                                           iou(F.softmax(out, dim=1), mask,
+                                                               num_classes=self.num_classes,
                                                                reduction='none'))}, global_step=self.global_step)
         return {'loss': loss}
 
     def validation_step(self, batch, batch_ix):
-        triplet_ixs, stacked_triplet_ims, mask = batch
-        out = self.forward(stacked_triplet_ims)
+        sample_ixs, stacked_sample_ims, mask = batch
 
-        loss = F.cross_entropy(out, mask, reduction="mean")
-        # loss = focal_loss(out, mask, alpha=1, gamma=2, reduction="mean")
+        out = self.forward(stacked_sample_ims)
+
+        # loss = F.cross_entropy(out, mask, reduction="mean")
+        loss = focal_loss(out, mask, alpha=1, gamma=2, reduction="mean")
+
         self.iou.update(F.softmax(out, dim=1), mask)
         self.log('val_loss', loss)
+
         # log images with segmentation mask
-        for triplet_ix, triplet_ims, out_mask in zip(triplet_ixs, stacked_triplet_ims, out):
-            triplet_ims = self.unnormalizer(triplet_ims)
-            im = triplet_ims[1]
+        for sample_ix, sample_ims, out_mask in zip(sample_ixs, stacked_sample_ims, out):
+            sample_ims = self.unnormalizer(sample_ims)
+            im = sample_ims[len(sample_ims) // 2]  # peak central channel (gray image)
             # im = im.permute(1, 2, 0).cpu().numpy()
             im = im.cpu().numpy()
             im = cv2.normalize(im, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F).astype(
@@ -121,13 +125,13 @@ class StanfordSegModel(pl.LightningModule):
                                                        zip(self.val_dataset.categories, val_iou)},
                                            global_step=self.global_step)
 
-    def forward_img(self, im_triplet):
+    def forward_img(self, sample_ims):
         self.net.eval()
         with torch.no_grad():
             # img = self.transform_val(image=img)["image"]
-            im_triplet = np.stack(im_triplet, axis=-1)
+            sample_ims = np.stack(sample_ims, axis=-1)
             # x = self.transform_test(im_triplet)['image']
-            x = self.val_dataset.torch_transform(im_triplet)
+            x = self.val_dataset.torch_transform(sample_ims)
             x = torch.unsqueeze(x, 0)
             x = x.to(self.device)
             out_mask = self.forward(x)
@@ -136,15 +140,15 @@ class StanfordSegModel(pl.LightningModule):
             out_mask = np.argmax(out_mask, axis=-1)
             # print(out_mask.max())
 
-        # print(im_triplet.shape, out_mask.shape)
-        masked_img = self.val_dataset.generate_masked_image(im_triplet[:, :, 1], out_mask, gray_img=True)
+        masked_img = self.val_dataset.generate_masked_image(sample_ims[:, :, len(sample_ims) // 2], out_mask,
+                                                            gray_img=True)
         return masked_img
 
     def configure_optimizers(self):
         opt = torch.optim.Adam(self.net.parameters(), lr=self.learning_rate, weight_decay=1e-5)
         # sch = torch.optim.lr_scheduler.CyclicLR(opt, base_lr=3e-5, max_lr=self.learning_rate, step_size_up=2000,
         #                                         mode="triangular2")
-        sch = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode="min", factor=0.1, patience=1)
+        sch = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode="min", factor=0.1, patience=1, verbose=True)
         return {
             'optimizer': opt,
             'lr_scheduler': sch,
@@ -157,42 +161,43 @@ class StanfordSegModel(pl.LightningModule):
             A.RandomCrop(self.input_size[0], self.input_size[1], always_apply=1),
             A.HorizontalFlip(p=0.5), A.VerticalFlip(p=0.5), A.Rotate(p=0.5),
             A.GridDistortion(p=0.2),
-            A.RandomBrightnessContrast((0, 0.5), (0, 0.5), p=0.5),
-            A.GaussNoise(p=0.3)], additional_targets={'box_mask': 'mask'},
-            bbox_params=A.BboxParams(format='pascal_voc', label_fields=['category_ids']))
+            A.RandomBrightnessContrast((0, 0.5), (0, 0.5), p=0.2),
+            A.GaussNoise(p=0.2)],
+            # additional_targets={'box_mask': 'mask'}, bbox_params=A.BboxParams(format='pascal_voc', label_fields=['category_ids'])
+        )
 
         self.transform_val = A.Compose([
             A.SmallestMaxSize(min(self.input_size[:2]), always_apply=True, interpolation=cv2.INTER_AREA),
             A.RandomCrop(self.input_size[0], self.input_size[1], always_apply=1),
-            # A.HorizontalFlip(),
-            # A.GridDistortion(p=0.2)
-        ], additional_targets={'box_mask': 'mask'},
-            bbox_params=A.BboxParams(format='pascal_voc', label_fields=['category_ids']))
-        # self.transform_test = A.Resize(self.input_size[0], self.input_size[1], interpolation=cv2.INTER_AREA,
-        #                                always_apply=True)
+        ],
+            # additional_targets={'box_mask': 'mask'}, bbox_params=A.BboxParams(format='pascal_voc', label_fields=['category_ids'])
+        )
 
-        self.train_dataset = StanfordDataset("data/stanford_drone/videos", interframe_step=self.interframe_step,
+        self.train_dataset = StanfordDataset("data/stanford_drone/videos",
+                                             n_frame_samples=self.in_channels, interframe_step=self.interframe_step,
                                              mode="train", part_of_dataset_to_use=self.part_of_train_dataset,
                                              dilate=True, transform=self.transform_train)
-        self.val_dataset = StanfordDataset("data/stanford_drone/videos", interframe_step=self.interframe_step,
+        self.val_dataset = StanfordDataset("data/stanford_drone/videos",
+                                           n_frame_samples=self.in_channels, interframe_step=self.interframe_step,
                                            mode="val", part_of_dataset_to_use=self.part_of_val_dataset,
                                            dilate=True, transform=self.transform_val)
-        self.unnormalizer = UnNormalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+
+        self.unnormalizer = UnNormalize(mean=self.train_dataset.mean, std=self.train_dataset.std)
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.train_batch_size, shuffle=True, num_workers=8,
                           pin_memory=True, drop_last=True)
 
     def val_dataloader(self) -> Union[DataLoader, List[DataLoader]]:
-        return DataLoader(self.val_dataset, batch_size=self.val_batch_size, shuffle=False, num_workers=8,
+        return DataLoader(self.val_dataset, batch_size=self.val_batch_size, shuffle=True, num_workers=8,
                           pin_memory=True, drop_last=True)
 
 
 def train():
     model = StanfordSegModel()
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
-        dirpath='checkpoints_stanford/deeplabv3_effnet-b2/',
-        save_top_k=1,
+        dirpath=f'checkpoints_stanford/deeplabv3_effnet-b2-{model.in_channels}ch/',
+        save_top_k=2,
         verbose=True,
         monitor='val_loss',
         mode='min',
@@ -204,7 +209,7 @@ def train():
                          num_sanity_val_steps=20,
                          log_every_n_steps=4,
                          # max_epochs=1,
-                         resume_from_checkpoint='checkpoints_stanford/deeplabv3_effnet-b2/epoch=10-step=3772.ckpt'
+                         # resume_from_checkpoint='checkpoints_stanford/deeplabv3_effnet-b2-7ch/epoch=5-step=10635.ckpt'
                          )
     trainer.fit(model)
 

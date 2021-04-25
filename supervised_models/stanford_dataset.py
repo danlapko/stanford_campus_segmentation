@@ -17,14 +17,16 @@ class StanfordDataset(Dataset):
     Ground truth masks are obtained by subtracting the background in the bounding rectangles of this object.
     """
 
-    def __init__(self, root_dir: str, interframe_step=1, mode="val", part_of_dataset_to_use=1, dilate=False,
-                 transform=None):
+    def __init__(self, root_dir: str,
+                 n_frame_samples=3, interframe_step=1,
+                 mode="val", part_of_dataset_to_use=1,
+                 dilate=False, transform=None):
         """
             root_dir: root dir of dataset where scenes all placed
-            interframe_step: 1 - consecutive 3 frames get into sample triplet,
-                             >1 - (i_frame-interframe_step, i_frame, i_frame+interframe_step) frames get into triplet,
-                             0 -  (i_frame, i_frame, i_frame) - triplet consists of same frames
+            interframe_step - distance between consecutive frames get into sample,
         """
+        assert n_frame_samples % 2 == 1
+        self.n_frame_samples = n_frame_samples
         self.dilate = dilate
         self.part_of_dataset_to_use = part_of_dataset_to_use
         self.interframe_step = interframe_step
@@ -33,11 +35,13 @@ class StanfordDataset(Dataset):
         self.mode = mode
         self.video_dirs = self._load_video_dirs()
 
-        self.triplets = self._prepare_triplets()
+        self.samples = self._prepare_samples()
 
         self.categories = ["default", "car", "person", "bicycle"]
         self.categories_2_label_map = {cat: i for i, cat in enumerate(self.categories)}
         self.labels_2_category_map = {i: cat for i, cat in enumerate(self.categories)}
+        # self.categories_2_label_map = {"default": 0, "car": 1, "person": 2, "bicycle": 2}
+        # self.labels_2_category_map = {0: "default", 1: "car", 2: "person"}
 
         self.categories_2_color_map = {"car": (0, 0, 255),  # blue
                                        "person": (0, 255, 0),  # green
@@ -46,8 +50,10 @@ class StanfordDataset(Dataset):
 
         # self.mean = [0.485, 0.456, 0.406, 0.485, 0.456, 0.406, 0.485, 0.456, 0.406]
         # self.std = [0.229, 0.224, 0.225, 0.229, 0.224, 0.225, 0.229, 0.224, 0.225]
-        self.mean = [0.485, 0.456, 0.406]
-        self.std = [0.229, 0.224, 0.225]
+        # self.mean = [0.485, 0.456, 0.406]
+        # self.std = [0.229, 0.224, 0.225]
+        self.mean = [0.456, ] * n_frame_samples
+        self.std = [0.224, ] * n_frame_samples
         self.torch_transform = T.Compose([T.ToTensor(), T.Normalize(self.mean, self.std)])
         self.dilate_kernel = np.ones((5, 5), np.uint8)
 
@@ -73,79 +79,59 @@ class StanfordDataset(Dataset):
             raise NotImplemented(f"mode {self.mode} not implemented")
         return video_dirs
 
-    def _prepare_triplets(self):
-        all_triplets = []
+    def _prepare_samples(self):
+        all_samples = []
         for video_dir in self.video_dirs:
             frame_names = os.listdir(os.path.join(video_dir, "frames"))
             frame_nums = list(sorted(map(lambda name: int(name.split(".")[0]), frame_names)))
-            video_triplets = []
+            video_samples = []
             boxes_df = pd.read_csv(os.path.join(video_dir, "boxes.csv"))
             for i in range(len(frame_nums)):
-                if i + 2 * self.interframe_step >= len(frame_nums):
+                if i + (self.n_frame_samples - 1) * self.interframe_step >= len(frame_nums):
                     break
-                # triplet = frame_nums[i:i + 2 * self.interframe_step + 1] #
-                triplet = [frame_nums[i], frame_nums[i + self.interframe_step],
-                           frame_nums[i + 2 * self.interframe_step]]
-                triplet_boxes_df = boxes_df[boxes_df["frame"] == i]
-                triplet_boxes = triplet_boxes_df.drop(columns=["frame"]).values.tolist()
-                if random.random() < self.part_of_dataset_to_use:
-                    video_triplets.append((video_dir, triplet, triplet_boxes))
+                sample_frames_ixs = [frame_nums[i + j * self.interframe_step] for j in range(self.n_frame_samples)]
+                target_frame_ix = i + self.n_frame_samples // 2 * self.interframe_step
+                sample_boxes_df = boxes_df[boxes_df["frame"] == target_frame_ix]
+                sample_boxes = sample_boxes_df.drop(columns=["frame"]).values.tolist()
 
-            all_triplets.extend(video_triplets)
-        return all_triplets
+                if random.random() < self.part_of_dataset_to_use:
+                    video_samples.append((video_dir, sample_frames_ixs, target_frame_ix, sample_boxes))
+
+            all_samples.extend(video_samples)
+        return all_samples
 
     def set_transform(self, transform):
         self.transform = transform
 
     def __len__(self):
-        return len(self.triplets)
+        return len(self.samples)
 
-    def __getitem__(self, item):
-        video_dir, triplet_nums, boxes = self.triplets[item]
-        triplet_ims = []
-        for triplet_num in triplet_nums:
-            im = cv2.imread(os.path.join(video_dir, "frames", f"{triplet_num}.jpg"), 0)
+    def __getitem__(self, sample_i):
+        video_dir, sample_frames_ixs, target_frame_ix, boxes = self.samples[sample_i]
+        sample_ims = []
+        for frame_ix in sample_frames_ixs:
+            im = cv2.imread(os.path.join(video_dir, "frames", f"{frame_ix}.jpg"), 0)
             # im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
-            triplet_ims.append(im)
+            sample_ims.append(im)
 
-        # stacked_triplet_ims = np.concatenate(triplet_ims, axis=2)
-        # print([im.shape for im in triplet_ims])
-        stacked_triplet_ims = np.stack(triplet_ims, axis=-1)
-        mask = cv2.imread(os.path.join(video_dir, "seg_masks", f"{triplet_nums[1]}.png"), 0)
-        # box_mask = cv2.imread(os.path.join(video_dir, "box_masks", f"{triplet_nums[1]}.png"), 0)
+        stacked_sample_ims = np.stack(sample_ims, axis=-1)
+        mask = cv2.imread(os.path.join(video_dir, "seg_masks", f"{target_frame_ix}.png"), 0)
+        mask[mask == self.categories_2_label_map["bicycle"]] = self.categories_2_label_map["person"]
 
         if self.dilate:
             mask = cv2.dilate(mask, self.dilate_kernel, iterations=1)
-        # print(mask.shape)
 
         if self.transform is not None:
-            # print(len(triplet_ims), triplet_ims[0].shape, stacked_triplet_ims.shape, mask.shape)
-            # a_transform = self.transform[:]
-            # if self.rotate_if_h_more_w and stacked_triplet_ims.shape[0] > stacked_triplet_ims.shape[1]:
-            #     a_transform = [A.Rotate((90, 90), cv2.INTER_AREA, p=1)] + a_transform
-            # a_transform = A.Compose(a_transform)
-
-            # boxes_ = [(x1, y1, x2, y2) for x1, y1, x2, y2, cat in boxes]
-
-            aug = self.transform(image=stacked_triplet_ims, mask=mask)  # , bboxes=boxes)  # , box_mask=box_mask)
-            stacked_triplet_ims = aug['image']
-            # stacked_triplet_ims = Image.fromarray(aug['image'])
+            aug = self.transform(image=stacked_sample_ims, mask=mask)  # , bboxes=boxes)  # , box_mask=box_mask)
+            stacked_sample_ims = aug['image']
             mask = aug['mask']
-            # box_mask = aug['mask']
 
         if self.transform is None:
-            stacked_triplet_ims = Image.fromarray(stacked_triplet_ims)
+            stacked_sample_ims = Image.fromarray(stacked_sample_ims)
 
-        # print(stacked_triplet_ims.shape)
-        stacked_triplet_ims = self.torch_transform(stacked_triplet_ims)
-        # print(stacked_triplet_ims.shape)
-        # if self.rotate_if_h_more_w and stacked_triplet_ims.shape[1] > stacked_triplet_ims.shape[2]:
-        #     stacked_triplet_ims = torch.rot90(stacked_triplet_ims, 1, [1, 2])
+        stacked_sample_ims = self.torch_transform(stacked_sample_ims)
         mask = torch.from_numpy(mask).long()
-        # box_mask = torch.from_numpy(box_mask).long()
-        # print(len(video_dir), len(triplet_nums), stacked_triplet_ims.shape, mask.shape, len(boxes))
-        triplet_ix = item
-        return triplet_ix, stacked_triplet_ims, mask  # , box_mask
+        return sample_i, stacked_sample_ims, mask
 
     def show_masks(self, alpha):
         raise NotImplemented
