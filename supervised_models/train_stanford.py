@@ -47,12 +47,12 @@ class UnNormalize(object):
 class StanfordSegModel(pl.LightningModule):
     def __init__(self):
         super(StanfordSegModel, self).__init__()
-        self.in_channels = 7
-        self.interframe_step = 3
+        self.in_channels = 5
+        self.interframe_step = 4
         self.num_classes = 3
-        self.input_size = np.array([640, 640, 3])  # 576, 864
+        self.input_size = np.array([512, 512, self.in_channels])  # 640, 640
 
-        self.train_batch_size = 2
+        self.train_batch_size = 4
         self.val_batch_size = 16
         self.learning_rate = 1e-4
 
