@@ -109,29 +109,34 @@ class StanfordDataset(Dataset):
     def __getitem__(self, sample_i):
         video_dir, sample_frames_ixs, target_frame_ix, boxes = self.samples[sample_i]
         sample_ims = []
+        sample_masks = []
         for frame_ix in sample_frames_ixs:
             im = cv2.imread(os.path.join(video_dir, "frames", f"{frame_ix}.jpg"), 0)
-            # im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
             sample_ims.append(im)
+            # im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+            mask = cv2.imread(os.path.join(video_dir, "seg_masks", f"{frame_ix}.png"), 0)
+            mask[mask == self.categories_2_label_map["bicycle"]] = self.categories_2_label_map["person"]
+            if self.dilate:
+                mask = cv2.dilate(mask, self.dilate_kernel, iterations=1)
+            sample_masks.append(mask)
 
         stacked_sample_ims = np.stack(sample_ims, axis=-1)
-        mask = cv2.imread(os.path.join(video_dir, "seg_masks", f"{target_frame_ix}.png"), 0)
-        mask[mask == self.categories_2_label_map["bicycle"]] = self.categories_2_label_map["person"]
+        stacked_sample_masks = np.stack(sample_masks, axis=-1)
 
-        if self.dilate:
-            mask = cv2.dilate(mask, self.dilate_kernel, iterations=1)
+        # mask = cv2.imread(os.path.join(video_dir, "seg_masks", f"{target_frame_ix}.png"), 0)
+        # mask[mask == self.categories_2_label_map["bicycle"]] = self.categories_2_label_map["person"]
 
         if self.transform is not None:
-            aug = self.transform(image=stacked_sample_ims, mask=mask)  # , bboxes=boxes)  # , box_mask=box_mask)
+            aug = self.transform(image=stacked_sample_ims, mask=stacked_sample_masks)  # , bboxes=boxes)  # , box_mask=box_mask)
             stacked_sample_ims = aug['image']
-            mask = aug['mask']
+            stacked_sample_masks = aug['mask']
 
         if self.transform is None:
             stacked_sample_ims = Image.fromarray(stacked_sample_ims)
 
         stacked_sample_ims = self.torch_transform(stacked_sample_ims)
-        mask = torch.from_numpy(mask).long()
-        return sample_i, stacked_sample_ims, mask
+        stacked_sample_masks = torch.from_numpy(stacked_sample_masks).long()
+        return sample_i, stacked_sample_ims, stacked_sample_masks
 
     def show_masks(self, alpha):
         raise NotImplemented

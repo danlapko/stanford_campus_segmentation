@@ -67,7 +67,8 @@ class StanfordSegModel(pl.LightningModule):
 
         self.iou = IoU(num_classes=self.num_classes, reduction="none")
 
-        self.net = DeepLabV3('efficientnet-b2', in_channels=self.in_channels, classes=self.num_classes)
+        self.net = DeepLabV3('efficientnet-b2', in_channels=self.in_channels,
+                             classes=self.num_classes * self.in_channels)
 
     def forward(self, x):
         out = self.net(x)
@@ -75,41 +76,57 @@ class StanfordSegModel(pl.LightningModule):
         return out
 
     def training_step(self, batch, batch_ix):
-        sample_ixs, stacked_sample_ims, mask = batch
+        sample_ixs, stacked_sample_ims, stacked_sample_masks = batch
 
         out = self.forward(stacked_sample_ims)
 
         # loss = F.cross_entropy(out, mask, reduction="mean")
-        loss = focal_loss(out, mask, alpha=1, gamma=2, reduction="mean")
+        losses = []
+        for i in range(self.in_channels):
+            cur_out = out[:, i * self.num_classes:(i + 1) * self.num_classes]
+            cur_mask = stacked_sample_masks[..., i]
+            cur_loss = focal_loss(cur_out, cur_mask, alpha=1, gamma=2, reduction="mean")
+            losses.append((i + 1) * cur_loss)
+        loss = sum(losses)
 
         self.log('train_loss', loss)
         self.logger.experiment.add_scalars("train_iou", {
             cat_name: cat_iou for cat_name, cat_iou in zip(self.train_dataset.categories,
-                                                           iou(F.softmax(out, dim=1), mask,
+                                                           iou(F.softmax(out[:, -self.num_classes:], dim=1),
+                                                               stacked_sample_masks[..., -1],
                                                                num_classes=self.num_classes,
-                                                               reduction='none'))}, global_step=self.global_step)
+                                                               reduction='none'))},
+                                           global_step=self.global_step)
         return {'loss': loss}
 
     def validation_step(self, batch, batch_ix):
-        sample_ixs, stacked_sample_ims, mask = batch
+        sample_ixs, stacked_sample_ims, stacked_sample_masks = batch
 
         out = self.forward(stacked_sample_ims)
 
         # loss = F.cross_entropy(out, mask, reduction="mean")
-        loss = focal_loss(out, mask, alpha=1, gamma=2, reduction="mean")
+        losses = []
+        for i in range(self.in_channels):
+            cur_out = out[:, i * self.num_classes:(i + 1) * self.num_classes]
+            cur_mask = stacked_sample_masks[..., i]
+            # print(cur_out.shape, cur_mask.shape)
+            cur_loss = focal_loss(cur_out, cur_mask, alpha=1, gamma=2, reduction="mean")
+            losses.append((i + 1) * cur_loss)
+        loss = sum(losses)
 
-        self.iou.update(F.softmax(out, dim=1), mask)
         self.log('val_loss', loss)
 
+        self.iou.update(F.softmax(out[:, -self.num_classes:], dim=1), stacked_sample_masks[..., -1])
+
         # log images with segmentation mask
-        for sample_ix, sample_ims, out_mask in zip(sample_ixs, stacked_sample_ims, out):
+        for sample_ix, sample_ims, sample_out in zip(sample_ixs, stacked_sample_ims, out):
             sample_ims = self.unnormalizer(sample_ims)
-            im = sample_ims[len(sample_ims) // 2]  # peak central channel (gray image)
+            im = sample_ims[-1]
             # im = im.permute(1, 2, 0).cpu().numpy()
             im = im.cpu().numpy()
             im = cv2.normalize(im, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F).astype(
                 np.uint8)
-
+            out_mask = sample_out[-self.num_classes:]
             out_mask = out_mask.permute(1, 2, 0).cpu().numpy()
             out_mask = np.argmax(out_mask, axis=-1)
 
