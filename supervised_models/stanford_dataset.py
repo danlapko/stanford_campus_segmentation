@@ -15,6 +15,7 @@ class StanfordDataset(Dataset):
     """
     Stanford drone dataset https://cvgl.stanford.edu/projects/uav_data/
     Ground truth masks are obtained by subtracting the background in the bounding rectangles of this object.
+    One sample - n stacked grayscale sequential frames.
     """
 
     def __init__(self, root_dir: str,
@@ -22,8 +23,13 @@ class StanfordDataset(Dataset):
                  mode="val", part_of_dataset_to_use=1,
                  dilate=False, transform=None):
         """
-            root_dir: root dir of dataset where scenes all placed
-            interframe_step - distance between consecutive frames get into sample,
+            root_dir: root dir of dataset where scenes are placed;
+            n_frame_samples: number of different frames get into one sample (sample - image with n-channels);
+            interframe_step - distance between consecutive frames get into sample;
+            mode - "val" or "train";
+            part_of_dataset_to_use - float in range of 0..1, representing which part of origin dataset to use
+                                    (samples get into the dataset randomly with probability of part_of_dataset_to_use);
+            dilate - if to use cv2.dilate to enlarge masks area;
         """
         assert n_frame_samples % 2 == 1
         self.n_frame_samples = n_frame_samples
@@ -40,25 +46,26 @@ class StanfordDataset(Dataset):
         self.categories = ["default", "person", "bicycle", "car", "skate"]
         self.categories_2_label_map = {cat: i for i, cat in enumerate(self.categories)}
         self.labels_2_category_map = {i: cat for i, cat in enumerate(self.categories)}
-        # self.categories_2_label_map = {"default": 0, "car": 1, "person": 2, "bicycle": 2}
-        # self.labels_2_category_map = {0: "default", 1: "car", 2: "person"}
 
         self.categories_2_color_map = {
-            #"car": (0, 0, 255),  # blue
-                                       "person": (0, 255, 0),  # green
-                                       "bicycle": (255, 255, 0)  # yellow
-                                       }
+            "car": (0, 0, 255),  # blue
+            "person": (0, 255, 0),  # green
+            "bicycle": (255, 255, 0)  # yellow
+        }
 
-        # self.mean = [0.485, 0.456, 0.406, 0.485, 0.456, 0.406, 0.485, 0.456, 0.406]
-        # self.std = [0.229, 0.224, 0.225, 0.229, 0.224, 0.225, 0.229, 0.224, 0.225]
-        self.mean = [0.485, 0.456, 0.406]
-        self.std = [0.229, 0.224, 0.225]
-        # self.mean = [0.456, ] * n_frame_samples
-        # self.std = [0.224, ] * n_frame_samples
+        if self.n_frame_samples == 3:
+            self.mean = [0.485, 0.456, 0.406]
+            self.std = [0.229, 0.224, 0.225]
+        else:
+            self.mean = [0.456, ] * n_frame_samples
+            self.std = [0.224, ] * n_frame_samples
+
         self.torch_transform = T.Compose([T.ToTensor(), T.Normalize(self.mean, self.std)])
         self.dilate_kernel = np.ones((5, 5), np.uint8)
 
     def _load_video_dirs(self):
+        """ Loading video paths for current dataset: 'val' contains 'video0' from every scene and whole 'little' scene,
+                                                    'train' contains all other videos """
         video_dirs = []
         scene_names = os.listdir(self.root_dir)
         if self.mode == "val":
@@ -81,6 +88,8 @@ class StanfordDataset(Dataset):
         return video_dirs
 
     def _prepare_samples(self):
+        """ Generates samples consisting of lists with len==n_frame_samples of frame_paths, appropriate mask_paths
+        and bounding boxes """
         all_samples = []
         for video_dir in self.video_dirs:
             frame_names = os.listdir(os.path.join(video_dir, "frames"))
@@ -102,6 +111,8 @@ class StanfordDataset(Dataset):
         return all_samples
 
     def set_transform(self, transform):
+        """ To have ability to set different transforms for train and val subsets after retrieving them from
+        random_split() """
         self.transform = transform
 
     def __len__(self):
@@ -117,8 +128,10 @@ class StanfordDataset(Dataset):
 
         stacked_sample_ims = np.stack(sample_ims, axis=-1)
         mask = cv2.imread(os.path.join(video_dir, "seg_masks", f"{target_frame_ix}.png"), 0)
-        mask[mask == self.categories_2_label_map["skate"]] = self.categories_2_label_map["person"]
-        mask[mask == self.categories_2_label_map["car"]] = self.categories_2_label_map["default"]
+        mask[mask == self.categories_2_label_map["skate"]] = self.categories_2_label_map[
+            "person"]  # reduce 'skate' class to 'person'
+        mask[mask == self.categories_2_label_map["car"]] = self.categories_2_label_map[
+            "default"]  # reduce 'car' class to 'default'
 
         if self.dilate:
             mask = cv2.dilate(mask, self.dilate_kernel, iterations=1)
@@ -135,21 +148,11 @@ class StanfordDataset(Dataset):
         mask = torch.from_numpy(mask).long()
         return sample_i, stacked_sample_ims, mask
 
-    def show_masks(self, alpha):
-        raise NotImplemented
-        for i, img_name in tqdm(enumerate(self.img_names), desc="show_masks"):
-            img = cv2.imread(os.path.join(self.original_images_dir, img_name))
-            mask = cv2.imread(os.path.join(self.value_masks_dir, img_name.replace(".jpg", ".png")), 0)
-
-            img = self.generate_masked_image(img, mask, alpha=alpha)
-            img = cv2.resize(img, None, fx=0.15, fy=0.15)
-            cv2.imshow(f"masked", img)
-            k = cv2.waitKey(30) & 0xff
-            if k == 27:
-                break
-        cv2.destroyAllWindows()
-
     def generate_masked_image(self, img, mask, alpha=0.4, gray_img=False):
+        """ Generates images with transparent mask by given image and mask (alpha - mask opacity)
+        img: 1-channel or 3-channel image;
+        mask: 1-channel mask where classes encoded by appropriate int labels;
+        gray_image: if to generate masked image for gray input image"""
         if gray_img:
             img = np.stack((img,) * 3, axis=-1)
         bgr_mask = np.zeros_like(img)
@@ -161,7 +164,5 @@ class StanfordDataset(Dataset):
 
 
 if __name__ == '__main__':
-    sdd_dataset = StanfordDataset(root_dir="data/stanford_drone")
-    # sdd_dataset.generate_value_masks_from_bgr()
-    sdd_dataset.show_masks(alpha=1)
-    print(len(sdd_dataset.images), len(sdd_dataset.value_masks))
+    stanford_dataset = StanfordDataset(root_dir="data/stanford_drone/videos")
+    print(len(stanford_dataset.samples))

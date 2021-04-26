@@ -3,25 +3,22 @@ import sys, os
 import torch
 from pytorch_lightning.metrics import IoU
 
-torch.manual_seed(0)
 from kornia.losses import focal_loss
 from pytorch_lightning.callbacks import LearningRateMonitor
 from pytorch_lightning.metrics.functional import iou
-from segmentation_models_pytorch import DeepLabV3Plus, DeepLabV3
+from segmentation_models_pytorch import DeepLabV3
 
-# from torchmetrics import IoU
-
-sys.path.append(os.getcwd())
 import cv2
 import numpy as np
 import torch
 from torch.nn import functional as F
-from torch.utils.data import DataLoader, random_split
-import torchvision.transforms as transforms
-import torchvision
+from torch.utils.data import DataLoader
 import pytorch_lightning as pl
 from typing import Union, List
 import albumentations as A
+
+torch.manual_seed(0)
+sys.path.append(os.getcwd())
 
 from supervised_models.stanford_dataset import StanfordDataset
 
@@ -49,7 +46,10 @@ class StanfordSegModel(pl.LightningModule):
         super(StanfordSegModel, self).__init__()
         self.in_channels = 3
         self.interframe_step = 10
-        self.num_classes = 3
+        self.num_classes = 3  # default - includes background, buses, cars and golf carts,
+        # person - includes pedestrians and skaters,
+        # bicycle - includes bikers
+
         self.input_size = np.array([640, 640, self.in_channels])  # 640, 640
 
         self.train_batch_size = 4
@@ -71,7 +71,6 @@ class StanfordSegModel(pl.LightningModule):
 
     def forward(self, x):
         out = self.net(x)
-        # print(x.shape, x.min(), x.max(), out.shape, out.min(), out.max())
         return out
 
     def training_step(self, batch, batch_ix):
@@ -104,8 +103,7 @@ class StanfordSegModel(pl.LightningModule):
         # log images with segmentation mask
         for sample_ix, sample_ims, out_mask in zip(sample_ixs, stacked_sample_ims, out):
             sample_ims = self.unnormalizer(sample_ims)
-            im = sample_ims[len(sample_ims) // 2]  # peak central channel (gray image)
-            # im = im.permute(1, 2, 0).cpu().numpy()
+            im = sample_ims[len(sample_ims) // 2]  # peak central channel (central gray image)
             im = im.cpu().numpy()
             im = cv2.normalize(im, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F).astype(
                 np.uint8)
@@ -125,21 +123,19 @@ class StanfordSegModel(pl.LightningModule):
                                                        zip(self.val_dataset.categories, val_iou)},
                                            global_step=self.global_step)
 
-    def forward_img(self, sample_ims):
+    def forward_img(self, sample_ims: List[np.array]):
+        """ Process sample grayscale images (n_images == self.input_size) and generates one segmentation
+        (for central input img) """
+
         self.net.eval()
         with torch.no_grad():
-            # img = self.transform_val(image=img)["image"]
             sample_ims = np.stack(sample_ims, axis=-1)
-            # x = self.transform_test(im_triplet)['image']
             x = self.val_dataset.torch_transform(sample_ims)
             x = torch.unsqueeze(x, 0)
             x = x.to(self.device)
             out_mask = self.forward(x)
-            # print(x.shape, out_mask.shape)
             out_mask = out_mask[0].permute(1, 2, 0).cpu().numpy()
             out_mask = np.argmax(out_mask, axis=-1)
-            # print(out_mask.max())
-        # print(sample_ims.shape)
         masked_img = self.val_dataset.generate_masked_image(sample_ims[:, :, sample_ims.shape[-1] // 2], out_mask,
                                                             gray_img=True)
         return masked_img
@@ -196,7 +192,7 @@ class StanfordSegModel(pl.LightningModule):
 def train():
     model = StanfordSegModel()
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
-        dirpath=f'checkpoints_stanford/deeplabv3_effnet-b2-{model.in_channels}ch/',
+        dirpath=f'checkpoints_stanford/deeplabv3_effnet-b0-{model.in_channels}ch/',
         save_top_k=2,
         verbose=True,
         monitor='val_loss',
@@ -208,8 +204,8 @@ def train():
                          checkpoint_callback=checkpoint_callback,
                          num_sanity_val_steps=20,
                          log_every_n_steps=4,
-                         # max_epochs=1,
-                         resume_from_checkpoint='checkpoints_stanford/deeplabv3_effnet-b2-3ch/epoch=16-step=11355.ckpt'
+                         max_epochs=23,
+                         resume_from_checkpoint="checkpoints_stanford/deeplabv3_effnet-b0-3ch/backup.epoch=22-step=15291.ckpt"
                          )
     trainer.fit(model)
 
