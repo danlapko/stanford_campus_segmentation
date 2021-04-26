@@ -134,10 +134,10 @@ def process_video(frames, annot_df, w, h, mask_thresh, needs_masked_img=False):
     output_frame_boxes = []
 
     class_2_label_id_map = {
-        "Bus": 1, "Car": 1, "Cart": 1,
-        "Pedestrian": 2,
-        "Biker": 3, "Skater": 3,
-
+        "Pedestrian": 1,
+        "Biker": 2,
+        "Bus": 3, "Car": 3, "Cart": 3,
+        "Skater": 4,
     }
 
     for i_frame in tqdm(range(len(frames)), 'processing'):
