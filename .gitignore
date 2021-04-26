@@ -6,3 +6,5 @@ data/
 logs/
 licenses/
 .ipynb_checkpoints/
+checkpoints_stanford/
+checkpoints_sdd/

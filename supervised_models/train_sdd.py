@@ -1,26 +1,22 @@
-import sys, os
+import os
+import sys
 
-import torch
-
-torch.manual_seed(0)
 from kornia.losses import focal_loss
 from pytorch_lightning.callbacks import LearningRateMonitor
 from pytorch_lightning.metrics.functional import iou
-from segmentation_models_pytorch import DeepLabV3Plus, DeepLabV3
+from segmentation_models_pytorch import DeepLabV3
 
-# from torchmetrics import IoU
-
-sys.path.append(os.getcwd())
 import cv2
 import numpy as np
 import torch
 from torch.nn import functional as F
 from torch.utils.data import DataLoader, random_split
-import torchvision.transforms as transforms
-import torchvision
 import pytorch_lightning as pl
 from typing import Union, List
 import albumentations as A
+
+torch.manual_seed(0)
+sys.path.append(os.getcwd())
 
 from supervised_models.sdd_dataset import SDD_Dataset
 
@@ -67,22 +63,14 @@ class SDDSegModel(pl.LightningModule):
         # self.net = DeepLabV3('mobilenet_v2', in_channels=3, classes=self.num_classes)
         # self.net = ENet(num_classes=19)
 
-        # self.net = ENet(num_classes=19)
-
     def forward(self, x):
-        # out = F.softmax(self.net(x)['out'], dim=1)
         # out = self.net(x)['out']
         out = self.net(x)
-        # print(x.shape, x.min(), x.max(), out.shape, out.min(), out.max())
         return out
 
     def training_step(self, batch, batch_ix):
         img_name, img, mask = batch
-        # img = img.float()
-        # mask = mask.long()
         out = self.forward(img)
-        # print(out.shape)
-        # print(mask.shape)
         loss = F.cross_entropy(out, mask)
         # loss = focal_loss(out, mask, alpha=1, gamma=2, reduction="mean")
 
@@ -120,6 +108,7 @@ class SDDSegModel(pl.LightningModule):
         return {'val_loss': loss, 'pred': out.cpu(), 'target': mask_batch.cpu()}
 
     def forward_img(self, img):
+        """ Process one image and generate masked segmentation for it """
         self.net.eval()
         with torch.no_grad():
             # img = self.transform_val(image=img)["image"]
@@ -128,10 +117,8 @@ class SDDSegModel(pl.LightningModule):
             x = torch.unsqueeze(x, 0)
             x = x.to(self.device)
             out_mask = self.forward(x)
-            # print(x.shape, out_mask.shape)
             out_mask = out_mask[0].permute(1, 2, 0).cpu().numpy()
             out_mask = np.argmax(out_mask, axis=-1)
-            # print(out_mask.max())
 
         masked_img = self.val_dataset.dataset.generate_masked_image(img, out_mask)
         return masked_img
@@ -164,21 +151,24 @@ class SDDSegModel(pl.LightningModule):
              A.GridDistortion(p=0.2),
              A.RandomBrightnessContrast((0, 0.5), (0, 0.5), p=0.5),
              A.GaussNoise(p=0.3)])
-        self.transform_val = A.Compose([A.Resize(self.input_size[0], self.input_size[1], interpolation=cv2.INTER_AREA),
-                                        # A.HorizontalFlip(),
-                                        # A.GridDistortion(p=0.2)
-                                        ])
-        dataset = SDD_Dataset("data/SDD", preload=False, transform=None)
 
+        self.transform_val = A.Compose([A.Resize(self.input_size[0], self.input_size[1], interpolation=cv2.INTER_AREA)])
+
+        dataset = SDD_Dataset("data/SDD", transform=None)
+
+        # split dataset to train/val subsets
         n_val = int(len(dataset) * self.val_split_part)
         n_train = len(dataset) - n_val
         train_ds, val_ds = random_split(dataset, [n_train, n_val])
 
+        # set individual transforms for subsets
         train_ds.dataset.set_transform(self.transform_train)
         val_ds.dataset.set_transform(self.transform_val)
 
         self.train_dataset = train_ds
         self.val_dataset = val_ds
+
+        # to ability to show generated segmentation
         self.unnormalizer = UnNormalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
     def train_dataloader(self):
@@ -191,7 +181,7 @@ class SDDSegModel(pl.LightningModule):
 def train():
     model = SDDSegModel()
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
-        dirpath='checkpoints/deeplabv3_effnet-b2/',
+        dirpath='checkpoints_sdd/deeplabv3_effnet-b2/',
         save_top_k=1,
         verbose=True,
         monitor='val_loss',
@@ -202,8 +192,8 @@ def train():
     trainer = pl.Trainer(gpus=1, callbacks=[lr_monitor], checkpoint_callback=checkpoint_callback,
                          num_sanity_val_steps=-1,
                          log_every_n_steps=4,
-                         # max_epochs=1,
-                         # resume_from_checkpoint='checkpoints/deeplabv3/epoch=31-step=2879.ckpt'
+                         max_epochs=22,
+                         resume_from_checkpoint='checkpoints_sdd/deeplabv3_effnet-b2/epoch=21-step=2639.ckpt'
                          )
     trainer.fit(model)
 

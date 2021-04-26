@@ -13,13 +13,12 @@ from tqdm import tqdm
 class SDD_Dataset(Dataset):
     """ Semantic drone dataset https://www.tugraz.at/index.php?id=22387 """
 
-    def __init__(self, root_dir: str, preload=False, transform=None):
+    def __init__(self, root_dir: str, transform=None):
         """
             root_dir: root dir of dataset where placed: RGB_color_image_masks/, semantic_drone_dataset/,
                       value_masks/ and class_dict_seg.csv
         """
         self.root_dir = root_dir
-        self.preload = preload
         self.transform = transform
         self.original_images_dir = os.path.join(root_dir, "semantic_drone_dataset", "original_images")
         self.rgb_masks_dir = os.path.join(root_dir, "RGB_color_image_masks")
@@ -36,22 +35,14 @@ class SDD_Dataset(Dataset):
             self.categories_2_bgr_map[category] = (b, g, r)
 
         self.img_names = os.listdir(self.original_images_dir)
-        self.images = [None] * len(self.img_names)
-        self.value_masks = [None] * len(self.img_names)
-
-        if self.preload:
-            for i, img_name in tqdm(enumerate(self.img_names), desc="show_masks"):
-                img = cv2.imread(os.path.join(self.original_images_dir, img_name))
-                mask = cv2.imread(os.path.join(self.value_masks_dir, img_name.replace(".jpg", ".png")), 0)
-
-                self.images[i] = img
-                self.value_masks[i] = mask
 
         self.mean = [0.485, 0.456, 0.406]
         self.std = [0.229, 0.224, 0.225]
         self.torch_transform = T.Compose([T.ToTensor(), T.Normalize(self.mean, self.std)])
 
     def set_transform(self, transform):
+        """ To have ability to set different transforms for train and val subsets after retrieving them from
+        random_split() """
         self.transform = transform
 
     def __len__(self):
@@ -76,6 +67,8 @@ class SDD_Dataset(Dataset):
         return img_name, img, mask
 
     def generate_value_masks_from_bgr(self):
+        """ Use this function during the dataset preparation to convert and store all masks from BGR colored (3 channel)
+        format to value (1 channel) format, where class label presented as integer number"""
         for i, img_name in tqdm(enumerate(self.img_names), desc="generating value_masks from bgr_masks"):
 
             bgr_mask = cv2.imread(os.path.join(self.rgb_masks_dir, img_name.replace(".jpg", ".png")))
@@ -87,6 +80,7 @@ class SDD_Dataset(Dataset):
             cv2.imwrite(os.path.join(self.value_masks_dir, img_name.replace(".jpg", ".png")), mask)
 
     def show_masks(self, alpha):
+        """ Show Dataset images with tranparent GT masks"""
         for i, img_name in tqdm(enumerate(self.img_names), desc="show_masks"):
             img = cv2.imread(os.path.join(self.original_images_dir, img_name))
             mask = cv2.imread(os.path.join(self.value_masks_dir, img_name.replace(".jpg", ".png")), 0)
@@ -100,6 +94,7 @@ class SDD_Dataset(Dataset):
         cv2.destroyAllWindows()
 
     def generate_masked_image(self, img, mask, alpha=0.6):
+        """ Generates images with transparent mask by given image and mask (alpha - mask opacity)"""
         bgr_mask = np.zeros_like(img)
         for cat, cat_bgr in self.categories_2_bgr_map.items():
             bgr_mask[mask == self.categories_2_label_map[cat]] = cat_bgr
