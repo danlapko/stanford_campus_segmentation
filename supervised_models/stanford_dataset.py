@@ -37,23 +37,24 @@ class StanfordDataset(Dataset):
 
         self.samples = self._prepare_samples()
 
-        self.categories = ["default", "car", "person", "bicycle"]
+        self.categories = ["default", "person", "bicycle", "car", "skate"]
         self.categories_2_label_map = {cat: i for i, cat in enumerate(self.categories)}
         self.labels_2_category_map = {i: cat for i, cat in enumerate(self.categories)}
         # self.categories_2_label_map = {"default": 0, "car": 1, "person": 2, "bicycle": 2}
         # self.labels_2_category_map = {0: "default", 1: "car", 2: "person"}
 
-        self.categories_2_color_map = {"car": (0, 0, 255),  # blue
+        self.categories_2_color_map = {
+            #"car": (0, 0, 255),  # blue
                                        "person": (0, 255, 0),  # green
                                        "bicycle": (255, 255, 0)  # yellow
                                        }
 
         # self.mean = [0.485, 0.456, 0.406, 0.485, 0.456, 0.406, 0.485, 0.456, 0.406]
         # self.std = [0.229, 0.224, 0.225, 0.229, 0.224, 0.225, 0.229, 0.224, 0.225]
-        # self.mean = [0.485, 0.456, 0.406]
-        # self.std = [0.229, 0.224, 0.225]
-        self.mean = [0.456, ] * n_frame_samples
-        self.std = [0.224, ] * n_frame_samples
+        self.mean = [0.485, 0.456, 0.406]
+        self.std = [0.229, 0.224, 0.225]
+        # self.mean = [0.456, ] * n_frame_samples
+        # self.std = [0.224, ] * n_frame_samples
         self.torch_transform = T.Compose([T.ToTensor(), T.Normalize(self.mean, self.std)])
         self.dilate_kernel = np.ones((5, 5), np.uint8)
 
@@ -116,7 +117,8 @@ class StanfordDataset(Dataset):
 
         stacked_sample_ims = np.stack(sample_ims, axis=-1)
         mask = cv2.imread(os.path.join(video_dir, "seg_masks", f"{target_frame_ix}.png"), 0)
-        mask[mask == self.categories_2_label_map["bicycle"]] = self.categories_2_label_map["person"]
+        mask[mask == self.categories_2_label_map["skate"]] = self.categories_2_label_map["person"]
+        mask[mask == self.categories_2_label_map["car"]] = self.categories_2_label_map["default"]
 
         if self.dilate:
             mask = cv2.dilate(mask, self.dilate_kernel, iterations=1)

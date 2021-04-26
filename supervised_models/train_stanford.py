@@ -47,16 +47,16 @@ class UnNormalize(object):
 class StanfordSegModel(pl.LightningModule):
     def __init__(self):
         super(StanfordSegModel, self).__init__()
-        self.in_channels = 5
-        self.interframe_step = 4
+        self.in_channels = 3
+        self.interframe_step = 10
         self.num_classes = 3
-        self.input_size = np.array([512, 512, self.in_channels])  # 640, 640
+        self.input_size = np.array([640, 640, self.in_channels])  # 640, 640
 
         self.train_batch_size = 4
         self.val_batch_size = 16
         self.learning_rate = 1e-4
 
-        self.part_of_train_dataset = 0.025
+        self.part_of_train_dataset = 0.045
         self.part_of_val_dataset = 0.15
 
         self.transform_train = None
@@ -67,7 +67,7 @@ class StanfordSegModel(pl.LightningModule):
 
         self.iou = IoU(num_classes=self.num_classes, reduction="none")
 
-        self.net = DeepLabV3('efficientnet-b2', in_channels=self.in_channels, classes=self.num_classes)
+        self.net = DeepLabV3('efficientnet-b0', in_channels=self.in_channels, classes=self.num_classes)
 
     def forward(self, x):
         out = self.net(x)
@@ -79,8 +79,8 @@ class StanfordSegModel(pl.LightningModule):
 
         out = self.forward(stacked_sample_ims)
 
-        # loss = F.cross_entropy(out, mask, reduction="mean")
-        loss = focal_loss(out, mask, alpha=1, gamma=2, reduction="mean")
+        loss = F.cross_entropy(out, mask, reduction="mean")
+        # loss = focal_loss(out, mask, alpha=1, gamma=2, reduction="mean")
 
         self.log('train_loss', loss)
         self.logger.experiment.add_scalars("train_iou", {
@@ -95,8 +95,8 @@ class StanfordSegModel(pl.LightningModule):
 
         out = self.forward(stacked_sample_ims)
 
-        # loss = F.cross_entropy(out, mask, reduction="mean")
-        loss = focal_loss(out, mask, alpha=1, gamma=2, reduction="mean")
+        loss = F.cross_entropy(out, mask, reduction="mean")
+        # loss = focal_loss(out, mask, alpha=1, gamma=2, reduction="mean")
 
         self.iou.update(F.softmax(out, dim=1), mask)
         self.log('val_loss', loss)
@@ -139,8 +139,8 @@ class StanfordSegModel(pl.LightningModule):
             out_mask = out_mask[0].permute(1, 2, 0).cpu().numpy()
             out_mask = np.argmax(out_mask, axis=-1)
             # print(out_mask.max())
-
-        masked_img = self.val_dataset.generate_masked_image(sample_ims[:, :, len(sample_ims) // 2], out_mask,
+        # print(sample_ims.shape)
+        masked_img = self.val_dataset.generate_masked_image(sample_ims[:, :, sample_ims.shape[-1] // 2], out_mask,
                                                             gray_img=True)
         return masked_img
 
@@ -148,7 +148,7 @@ class StanfordSegModel(pl.LightningModule):
         opt = torch.optim.Adam(self.net.parameters(), lr=self.learning_rate, weight_decay=1e-5)
         # sch = torch.optim.lr_scheduler.CyclicLR(opt, base_lr=3e-5, max_lr=self.learning_rate, step_size_up=2000,
         #                                         mode="triangular2")
-        sch = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode="min", factor=0.1, patience=1, verbose=True)
+        sch = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode="min", factor=0.2, patience=2, verbose=True)
         return {
             'optimizer': opt,
             'lr_scheduler': sch,
@@ -209,7 +209,7 @@ def train():
                          num_sanity_val_steps=20,
                          log_every_n_steps=4,
                          # max_epochs=1,
-                         # resume_from_checkpoint='checkpoints_stanford/deeplabv3_effnet-b2-7ch/epoch=5-step=10635.ckpt'
+                         resume_from_checkpoint='checkpoints_stanford/deeplabv3_effnet-b2-3ch/epoch=16-step=11355.ckpt'
                          )
     trainer.fit(model)
 
