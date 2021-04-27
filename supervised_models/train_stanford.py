@@ -1,6 +1,5 @@
 import sys, os
 
-import torch
 from pytorch_lightning.metrics import IoU
 
 from kornia.losses import focal_loss
@@ -123,14 +122,22 @@ class StanfordSegModel(pl.LightningModule):
                                                        zip(self.val_dataset.categories, val_iou)},
                                            global_step=self.global_step)
 
-    def forward_img(self, sample_ims: List[np.array]):
+    def forward_img(self, sample_ims: List[np.array], smallest_size=640):
         """ Process sample grayscale images (n_images == self.input_size) and generates one segmentation
         (for central input img) """
+        transform = A.Compose([
+            A.SmallestMaxSize(smallest_size, always_apply=True, interpolation=cv2.INTER_AREA),
+            A.PadIfNeeded(min_height=None, min_width=None, pad_height_divisor=16, pad_width_divisor=16,
+                          border_mode=cv2.BORDER_CONSTANT,
+                          always_apply=True, value=0)
+        ])
 
+        sample_ims = np.stack(sample_ims, axis=-1)
+        sample_ims = transform(image=sample_ims)["image"]
         self.net.eval()
         with torch.no_grad():
-            sample_ims = np.stack(sample_ims, axis=-1)
-            x = self.val_dataset.torch_transform(sample_ims)
+            x = sample_ims
+            x = self.val_dataset.torch_transform(x)
             x = torch.unsqueeze(x, 0)
             x = x.to(self.device)
             out_mask = self.forward(x)
@@ -168,6 +175,17 @@ class StanfordSegModel(pl.LightningModule):
         ],
             # additional_targets={'box_mask': 'mask'}, bbox_params=A.BboxParams(format='pascal_voc', label_fields=['category_ids'])
         )
+
+        # self.transform_test = A.Compose([
+        #     A.SmallestMaxSize(min(self.input_size[:2]), always_apply=True, interpolation=cv2.INTER_AREA),
+        #     # A.CenterCrop(height=self.input_size[0], width=self.input_size[1], always_apply=True)
+        #     # A.PadIfNeeded(min_height=self.input_size[0], min_width=self.input_size[1], pad_height_divisor=16,
+        #     #               pad_width_divisor=16, border_mode=cv2.BORDER_CONSTANT, always_apply=True, value=0)
+        #     A.PadIfNeeded(min_height=None, min_width=None, pad_height_divisor=16, pad_width_divisor=16,
+        #                   border_mode=cv2.BORDER_CONSTANT,
+        #                   always_apply=True, value=0)
+        #     # A.RandomCrop(self.input_size[0], self.input_size[1], always_apply=1),
+        # ])
 
         self.train_dataset = StanfordDataset("data/stanford_drone/videos",
                                              n_frame_samples=self.in_channels, interframe_step=self.interframe_step,

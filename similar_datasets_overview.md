@@ -1,0 +1,66 @@
+{
+ "cells": [],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 2
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython2",
+   "version": "2.7.6"
+  },
+  "pycharm": {
+   "stem_cell": {
+    "cell_type": "raw",
+    "source": [
+     "\n",
+     "## Similar datasets overview\n",
+     "\n",
+     "Search on github did not give any results related to the segmentation task for stanford drone dataset;\n",
+     "\n",
+     "Review of datasets mentioned here https://github.com/eric-erki/awesome-satellite-imagery-datasets,\n",
+     "here https://lionbridge.ai/datasets/15-best-aerial-image-datasets-for-machine-learning/ and in google search for transfer learning purposes:\n",
+     "\n",
+     "* dd-ml-segmentation-benchmark. Here only 'car' class overlaps with our dataset, also most of the cars are parked and have very small size, seems not very usefull for transfer learning\n",
+     "https://github.com/dronedeploy/dd-ml-segmentation-benchmark\n",
+     "\n",
+     "* DLR-SkyScapes: Aerial Semantic Segmentation Dataset for HD-mapping.\n",
+     "Here there are some vehicle classes (car, trailer, van, truck, large truck, bus), images have similar zoom as stanford dataset.\n",
+     "In total there are 16 images of size 5616x3744, dataset could be accessed only by request.\n",
+     "https://www.dlr.de/eoc/en/desktopdefault.aspx/tabid-12760/22294_read-58694\n",
+     "\n",
+     "* Dstl Satellite Imagery Feature Detection. Include small and large vehicle classes. Good article about competition and training process.\n",
+     "https://habr.com/ru/company/avito/blog/325632/\n",
+     "\n",
+     "* ISPRS Test Project on Urban Classification and 3D Building Reconstruction. Contains car objects. Data available upon request.\n",
+     "https://www2.isprs.org/commissions/comm2/wg4/benchmark/semantic-labeling/\n",
+     "\n",
+     "* [Good] Aerial Semantic Segmentation Drone Dataset. 400 images at a size of 6000x4000px (24Mpx).\n",
+     "Contains following classes: person, dog, car, bicycle. https://www.kaggle.com/bulentsiyah/semantic-drone-dataset\n",
+     "\n",
+     "* [Good] UAVID 2020 segmentation dataset. Contains 30 sequence of  4k frames labeled in 4 including following categories: Moving car, Static car, Human.\n",
+     "https://uavid.nl/ . Camera orientation is not vertical, tilt angle ~45 grad\n",
+     "\n",
+     "* [Good] Aeroscapes. Dataset comprises of images captured using a commercial drone from an altitude range of 5 to 50 metres. The dataset provides 3269 720p images and ground-truth masks for 11 classes including Car, Bike, Person, Animal.\n",
+     "Camera orientation varies from vertical to horizontal.\n",
+     "https://github.com/ishann/aeroscapes\n",
+     "\n"
+    ],
+    "metadata": {
+     "collapsed": false
+    }
+   }
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 0
+}
