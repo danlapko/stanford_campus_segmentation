@@ -105,6 +105,6 @@ class SDD_Dataset(Dataset):
 
 if __name__ == '__main__':
     sdd_dataset = SDD_Dataset(root_dir="data/SDD")
-    # sdd_dataset.generate_value_masks_from_bgr()
+    sdd_dataset.generate_value_masks_from_bgr()
     sdd_dataset.show_masks(alpha=0.5)
     print(len(sdd_dataset.images), len(sdd_dataset.value_masks))
