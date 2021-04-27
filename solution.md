@@ -2,19 +2,18 @@
 
 Stanford drone dataset has next object classes: pedestrians, bikers, skateboarders, cars, buses, and golf carts. For
 drone navigation task it would be useful to reduce number of classes by following rules:
-pedestrians -> person; bikers and skateboarders -> bicycle; buses, cars and golf carts -> cars, because this aggregated
+pedestrians, skateboarders -> person; bikers -> bicycle; buses, cars and golf carts -> cars, because this aggregated
 classes represents objects of the similar physical dimensions and moving behavior, what is important for drone
 navigation planning.
 
-So now we have 3 classes: pedestrians, bikers and cars.
+So now we have 3 classes: persons, bicycles and cars.
 
 ### Train/val splits
 
-It is necessary to have some data for verification. I suggest splitting dataset in train/val in following way:
+I suggest splitting dataset in train/val in following way:
 
 * In every scene bring one video to val split;
-* Also bring to val one whole scene because dataset itself has low number of scenes which can differ a lot from each
-  other, so we need to check model on completely unseen data.
+* Also bring to val one whole scene because dataset itself has low number of scenes, so we need to check model on completely unseen data.
 
 
 ### Stanford dataset analysis
@@ -26,7 +25,7 @@ Provided in stanford_dataset_overview.ipynb
 Cause stanford drone dataset has no segmentation annotation we need either to create Unsupervised segmentation
 annotation for learning/inference purposes or apply pretrained on similar dataset model to our data.
 
-Overall I think the following segmentation 3 approaches are worth to be considered:
+Overall I think the following segmentation approaches are worth to be considered:
 
 1. <b>Unsupervised segmentation based on background image. </b>
    Having background image for each clip it is easy to get segmentation by subtraction of frames and background, class
